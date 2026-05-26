@@ -3,15 +3,12 @@ import requests
 import time
 import calendar
 import os
-import google.genai as genai
 from datetime import datetime, timedelta, timezone
 
 # --- CREDENCIAIS ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-
-client = genai.Client(api_key=GEMINI_API_KEY)
 
 # --- FONTES EXPANDIDAS ---
 FEEDS = [
@@ -55,7 +52,6 @@ REGRA: Se nada for relevante, responda EXATAMENTE com a palavra: VAZIO. NUNCA ut
 """
 
 def enviar_telegram(mensagem):
-    # Fatiamento seguro para os 4096 caracteres do Telegram
     partes = [mensagem[i:i+4000] for i in range(0, len(mensagem), 4000)]
     for parte in partes:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -63,63 +59,53 @@ def enviar_telegram(mensagem):
             'chat_id': CHAT_ID, 
             'text': parte, 
             'parse_mode': 'HTML',
-            # O link_preview_options desativa o painel gigante que o Telegram tenta criar para cada link
             'link_preview_options': {'is_disabled': True} 
         }
         resposta = requests.post(url, json=payload)
         
         if resposta.status_code != 200:
             print(f"Erro do Telegram ao enviar: {resposta.text}")
-            
-            # Limpa as tags HTML para forçar o envio em modo texto simples
             texto_limpo = parte.replace("<b>", "").replace("</b>", "")
             payload_limpo = {
                 'chat_id': CHAT_ID, 
                 'text': texto_limpo,
                 'link_preview_options': {'is_disabled': True} 
             }
-            resposta_fallback = requests.post(url, json=payload_limpo)
-            
-            if resposta_fallback.status_code == 200:
-                print("Mensagem de segurança enviada com sucesso em texto simples!")
-            else:
-                print(f"Falha crítica no Telegram: {resposta_fallback.text}")
+            requests.post(url, json=payload_limpo)
 
 def analisar_bloco_com_ia(lista_noticias):
     prompt = f"{CONTEXTO}\n\n=== NOTÍCIAS RECENTES ===\n" + "\n".join(lista_noticias)
-    max_tentativas = 3
     
-    for tentativa in range(max_tentativas):
-        try:
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt
-            )
-            texto_final = response.text.strip()
+    # Conexão DIRETA via URL (Bypassa bibliotecas quebradas)
+    url_ia = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    headers = {'Content-Type': 'application/json'}
+    dados = {
+        "contents": [{"parts":[{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3}
+    }
+    
+    try:
+        resposta_ia = requests.post(url_ia, headers=headers, json=dados)
+        
+        if resposta_ia.status_code == 200:
+            resultado_json = resposta_ia.json()
+            texto_final = resultado_json['candidates'][0]['content']['parts'][0]['text'].strip()
             
             if texto_final.upper() != "VAZIO" and texto_final:
                 texto_final = texto_final.replace("```html", "").replace("```", "").strip()
                 enviar_telegram(texto_final)
-                print("Boletim enviado para a função do Telegram!")
+                print("Boletim processado e enviado!")
             else:
                 print("Nenhuma relevância encontrada pela IA.")
+        else:
+            print(f"O servidor da IA recusou a conexão: {resposta_ia.status_code} - {resposta_ia.text}")
             
-            # Se deu certo, sai do loop de tentativas
-            break
-                
-        except Exception as e:
-            print(f"Erro na IA (Tentativa {tentativa + 1}/{max_tentativas}): {e}")
-            if tentativa < max_tentativas - 1:
-                print("Servidor ocupado. Aguardando 10 segundos para tentar novamente...")
-                time.sleep(10)
-            else:
-                print("Falha definitiva após 3 tentativas. O servidor do Google está muito congestionado agora.")
+    except Exception as e:
+        print(f"Erro de comunicação com a IA: {e}")
 
 def buscar_furos():
     agora = datetime.now(timezone.utc)
-    # ATENÇÃO: Mantive 1 dia (days=1) para você poder testar agora. 
-    # Lembre de trocar para minutes=15 depois!
-    margem_tempo = agora - timedelta(days=1)
+    margem_tempo = agora - timedelta(days=1) # Mantido 1 dia para o teste rodar agora
     noticias_coletadas = []
     
     for url in FEEDS:
@@ -137,7 +123,7 @@ def buscar_furos():
             continue
     
     if noticias_coletadas:
-        print(f"Enviando {len(noticias_coletadas)} matérias para agrupamento...")
+        print(f"Enviando {len(noticias_coletadas)} matérias diretamente para a API...")
         analisar_bloco_com_ia(noticias_coletadas)
     else:
         print("Nenhuma atualização recente.")

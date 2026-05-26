@@ -76,8 +76,8 @@ def enviar_telegram(mensagem):
 def analisar_bloco_com_ia(lista_noticias):
     prompt = f"{CONTEXTO}\n\n=== NOTÍCIAS RECENTES ===\n" + "\n".join(lista_noticias)
     
-    # Conexão DIRETA via URL (Bypassa bibliotecas quebradas)
-    url_ia = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # Conexão DIRETA via URL (Corrigido para gemini-2.5-flash)
+    url_ia = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {'Content-Type': 'application/json'}
     dados = {
         "contents": [{"parts":[{"text": prompt}]}],

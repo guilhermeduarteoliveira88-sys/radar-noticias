@@ -87,27 +87,38 @@ def enviar_telegram(mensagem):
 
 def analisar_bloco_com_ia(lista_noticias):
     prompt = f"{CONTEXTO}\n\n=== NOTÍCIAS RECENTES ===\n" + "\n".join(lista_noticias)
+    max_tentativas = 3
     
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt
-        )
-        texto_final = response.text.strip()
-        
-        if texto_final.upper() != "VAZIO" and texto_final:
-            texto_final = texto_final.replace("```html", "").replace("```", "").strip()
-            enviar_telegram(texto_final)
-            print("Boletim enviado para a função do Telegram!")
-        else:
-            print("Nenhuma relevância encontrada pela IA.")
+    for tentativa in range(max_tentativas):
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            texto_final = response.text.strip()
             
-    except Exception as e:
-        print(f"Erro na IA: {e}")
+            if texto_final.upper() != "VAZIO" and texto_final:
+                texto_final = texto_final.replace("```html", "").replace("```", "").strip()
+                enviar_telegram(texto_final)
+                print("Boletim enviado para a função do Telegram!")
+            else:
+                print("Nenhuma relevância encontrada pela IA.")
+            
+            # Se deu certo, sai do loop de tentativas
+            break
+                
+        except Exception as e:
+            print(f"Erro na IA (Tentativa {tentativa + 1}/{max_tentativas}): {e}")
+            if tentativa < max_tentativas - 1:
+                print("Servidor ocupado. Aguardando 10 segundos para tentar novamente...")
+                time.sleep(10)
+            else:
+                print("Falha definitiva após 3 tentativas. O servidor do Google está muito congestionado agora.")
 
 def buscar_furos():
     agora = datetime.now(timezone.utc)
-    # Buscando matérias do último 1 dia para o teste
+    # ATENÇÃO: Mantive 1 dia (days=1) para você poder testar agora. 
+    # Lembre de trocar para minutes=15 depois!
     margem_tempo = agora - timedelta(days=1)
     noticias_coletadas = []
     

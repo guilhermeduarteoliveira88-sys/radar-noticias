@@ -12,7 +12,7 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# --- FONTES EXPANDIDAS ---
+# --- FONTES EXPANDIDAS (Política + Tendências) ---
 FEEDS = [
     # Portais Tradicionais
     'https://www.poder360.com.br/feed/',
@@ -26,19 +26,28 @@ FEEDS = [
     'https://bsky.app/profile/andreiasadi.bsky.social/rss',
     'https://bsky.app/profile/igorgadelha.bsky.social/rss',
     'https://bsky.app/profile/octavio-guedes.bsky.social/rss',
-    'https://bsky.app/profile/camilabomfim.bsky.social/rss'
+    'https://bsky.app/profile/camilabomfim.bsky.social/rss',
+    
+    # Entretenimento e Alta no Google
+    'https://hugogloss.uol.com.br/feed/',
+    'https://trends.google.com/trends/trendingsearches/daily/rss?geo=BR'
 ]
 
 # --- INSTRUÇÃO DE AGRUPAMENTO DA IA ---
 CONTEXTO = """
-Você é um curador de informações. Abaixo você receberá uma lista com TODAS as notícias e posts publicados nos últimos 15 minutos.
+Você é um curador de informações estratégicas. Abaixo você receberá uma lista com TODAS as notícias, trends e posts publicados nos últimos 15 minutos.
 
-Seu público-alvo foca em: Governo Federal, publicidade legal, leis com impacto real, eleições, e infraestrutura/mobilidade no DF e Entorno (Consórcio Intermunicipal).
+Seu público-alvo tem um olhar voltado para o cenário institucional (Governo, DF e Entorno), mas também monitora o mercado de comunicação, publicidade e o que está pautando a internet (cultura pop e termos em alta).
 
 SUA TAREFA:
-1. Ignore tudo que for irrelevante ou fofoca vazia.
-2. Agrupe as matérias que falam sobre o MESMO ASSUNTO.
+1. Ignore intrigas de nicho e fofocas irrelevantes de subcelebridades.
+2. Agrupe as matérias por temas centrais.
 3. Crie um resumo limpo e direto agrupando as fontes.
+
+TEMAS DE INTERESSE:
+- Política e Administração: Governo Federal, Diário Oficial, concursos, eleições.
+- Local: Infraestrutura, mobilidade urbana do Entorno do DF e Consórcio Intermunicipal.
+- Termos em Alta e Cultura Pop: O que está estourando no Google Trends e as grandes polêmicas/notícias do entretenimento (tipo Hugo Gloss) que impactam as redes sociais.
 
 FORMATO OBRIGATÓRIO DE SAÍDA (Use HTML):
 🚨 <b>Radar Atualizado</b>
@@ -49,7 +58,7 @@ FORMATO OBRIGATÓRIO DE SAÍDA (Use HTML):
 
 (Repita o bloco acima se houver mais de um assunto diferente)
 
-REGRA CRÍTICA: Se a lista original não tiver NENHUMA notícia relevante para o perfil, não invente nada. Responda EXATAMENTE com a palavra: VAZIO
+REGRA CRÍTICA: Se a lista não tiver NENHUMA notícia realmente relevante para esse cruzamento de política com comunicação de massa, não invente nada. Responda EXATAMENTE com a palavra: VAZIO
 """
 
 def enviar_telegram(mensagem):
@@ -67,9 +76,7 @@ def analisar_bloco_com_ia(lista_noticias):
         )
         texto_final = response.text.strip()
         
-        # O código não envia nada se a IA julgar que tudo era inútil
         if texto_final != "VAZIO" and texto_final != "":
-            # Limpa possíveis formatações de markdown que a IA possa tentar incluir
             texto_final = texto_final.replace("```html", "").replace("```", "").strip()
             enviar_telegram(texto_final)
             print("Boletim enviado com sucesso!")
@@ -81,7 +88,7 @@ def analisar_bloco_com_ia(lista_noticias):
 
 def buscar_furos():
     agora = datetime.now(timezone.utc)
-    # Alterado para 15 minutos
+    # Roda a cada 15 minutos na nuvem
     margem_tempo = agora - timedelta(minutes=15)
     
     noticias_coletadas = []
@@ -95,12 +102,10 @@ def buscar_furos():
                 if data_artigo > margem_tempo:
                     titulo = artigo.title
                     link = artigo.link
-                    # Guarda na lista para enviar tudo de uma vez
                     noticias_coletadas.append(f"- {titulo}\nLink: {link}\n")
         except Exception:
             continue
     
-    # Se achou alguma coisa nos últimos 15 min, manda o pacote pra IA julgar
     if noticias_coletadas:
         print(f"{len(noticias_coletadas)} notícias cruas encontradas. Enviando para IA agrupar...")
         analisar_bloco_com_ia(noticias_coletadas)

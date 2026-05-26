@@ -11,7 +11,6 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-# Instancia o cliente da IA
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # --- FONTES EXPANDIDAS ---
@@ -60,12 +59,12 @@ def enviar_telegram(mensagem):
         requests.post(url, data=payload)
 
 def analisar_bloco_com_ia(lista_noticias):
-    # O contexto é injetado diretamente no corpo do texto para evitar erros de config da API
     prompt = f"{CONTEXTO}\n\n=== NOTÍCIAS RECENTES ===\n" + "\n".join(lista_noticias)
     
     try:
+        # CORREÇÃO APLICADA: Atualizado para o modelo gemini-2.5-flash
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.5-flash',
             contents=prompt
         )
         texto_final = response.text.strip()
@@ -82,8 +81,8 @@ def analisar_bloco_com_ia(lista_noticias):
 
 def buscar_furos():
     agora = datetime.now(timezone.utc)
-    # Voltei para 2 dias para forçarmos o teste e vermos o boletim chegar agora
-    margem_tempo = agora - timedelta(days=2)
+    # Buscando matérias das últimas 24 horas para garantir que o teste funcione
+    margem_tempo = agora - timedelta(days=1)
     noticias_coletadas = []
     
     for url in FEEDS:

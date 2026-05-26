@@ -56,13 +56,26 @@ def enviar_telegram(mensagem):
     for parte in partes:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {'chat_id': CHAT_ID, 'text': parte, 'parse_mode': 'HTML'}
-        requests.post(url, data=payload)
+        resposta = requests.post(url, data=payload)
+        
+        # Se o Telegram rejeitar a mensagem (normalmente por quebra no HTML gerado pela IA)
+        if resposta.status_code != 200:
+            print(f"Erro do Telegram ao enviar HTML: {resposta.text}")
+            print("Tentando reenviar em modo de texto simples como segurança...")
+            
+            # Remove a exigência do modo HTML e tenta enviar a mesma mensagem novamente
+            payload['parse_mode'] = None
+            resposta_fallback = requests.post(url, data=payload)
+            
+            if resposta_fallback.status_code == 200:
+                print("Mensagem de segurança enviada com sucesso em texto simples!")
+            else:
+                print(f"Falha crítica no Telegram: {resposta_fallback.text}")
 
 def analisar_bloco_com_ia(lista_noticias):
     prompt = f"{CONTEXTO}\n\n=== NOTÍCIAS RECENTES ===\n" + "\n".join(lista_noticias)
     
     try:
-        # CORREÇÃO APLICADA: Atualizado para o modelo gemini-2.5-flash
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=prompt
@@ -72,7 +85,7 @@ def analisar_bloco_com_ia(lista_noticias):
         if texto_final.upper() != "VAZIO" and texto_final:
             texto_final = texto_final.replace("```html", "").replace("```", "").strip()
             enviar_telegram(texto_final)
-            print("Boletim enviado com sucesso!")
+            print("Boletim enviado para a função do Telegram!")
         else:
             print("Nenhuma relevância encontrada pela IA.")
             
@@ -81,7 +94,7 @@ def analisar_bloco_com_ia(lista_noticias):
 
 def buscar_furos():
     agora = datetime.now(timezone.utc)
-    # Buscando matérias das últimas 24 horas para garantir que o teste funcione
+    # Buscando matérias do último 1 dia para garantir que o teste funcione agora
     margem_tempo = agora - timedelta(days=1)
     noticias_coletadas = []
     

@@ -52,13 +52,12 @@ def avaliar_relevancia_com_ia(titulo, resumo):
         decisao = resposta.text.strip().upper() 
         return "SIM" in decisao
     except Exception:
-        # Se a IA falhar (ex: instabilidade), assume False para não mandar spam
         return False
 
 def buscar_furos():
-    # Pega a hora atual e define o limite para matérias dos últimos 15 minutos
+    # Pega a hora atual e define o limite para matérias dos últimos 2 dias (para o teste)
     agora = datetime.now(timezone.utc)
-    margem_tempo = agora - timedelta(minutes=15)
+    margem_tempo = agora - timedelta(days=2)
     
     for url in FEEDS:
         feed = feedparser.parse(url)
@@ -68,7 +67,7 @@ def buscar_furos():
                 # Converte a data do feed
                 data_artigo = datetime.fromtimestamp(time.mktime(artigo.published_parsed), timezone.utc)
                 
-                # Só processa se for matéria muito recente
+                # Só processa se for matéria recente
                 if data_artigo > margem_tempo:
                     titulo = artigo.title
                     resumo = artigo.get('summary', '') 

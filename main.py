@@ -6,9 +6,8 @@ import google.generativeai as genai
 # ==========================================
 # CONFIGURAÇÕES DE API E TELEGRAM
 # ==========================================
-# No GitHub, configure essas variáveis na aba: Settings > Secrets and variables > Actions
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("ID_DO_CHAT")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -91,6 +90,8 @@ def enviar_telegram(mensagem):
     resposta = requests.post(url, json=payload)
     if resposta.status_code != 200:
         print(f"Erro no Telegram: {resposta.text}")
+    else:
+        print("Mensagem enviada com sucesso ao Telegram!")
 
 def main():
     print("Buscando notícias...")
@@ -102,7 +103,7 @@ def main():
     print("Buscando Google Trends...")
     trends = buscar_trends()
     
-    # Monta a mensagem final no layout que testamos
+    # Monta a mensagem final no layout
     mensagem_final = f"🚨 **Radar Relevante | Edição Atualizada**\n\n"
     mensagem_final += f"{noticias_curadas}\n\n"
     mensagem_final += f"---\n📈 **Top Palavras do Google**\n\n"

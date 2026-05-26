@@ -1,116 +1,116 @@
-import feedparser
-import requests
-import time
 import os
-from google import genai
-from datetime import datetime, timedelta, timezone
+import requests
+import feedparser
+import google.generativeai as genai
 
-# --- CREDENCIAIS ---
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-CHAT_ID = os.environ.get('CHAT_ID')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+# ==========================================
+# CONFIGURAÇÕES DE API E TELEGRAM
+# ==========================================
+# No GitHub, configure essas variáveis na aba: Settings > Secrets and variables > Actions
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
 
-# --- FONTES EXPANDIDAS (Política + Tendências) ---
-FEEDS = [
-    # Portais Tradicionais
-    'https://www.poder360.com.br/feed/',
-    'https://g1.globo.com/rss/g1/politica/',
-    'https://www.metropoles.com/feed',
-    'https://noticias.uol.com.br/politica/rss.xml',
-    'https://www.cartacapital.com.br/politica/feed/',
-    'https://oantagonista.com.br/feed/',
-    
-    # Jornalistas (Furos Rápidos via Bluesky)
-    'https://bsky.app/profile/andreiasadi.bsky.social/rss',
-    'https://bsky.app/profile/igorgadelha.bsky.social/rss',
-    'https://bsky.app/profile/octavio-guedes.bsky.social/rss',
-    'https://bsky.app/profile/camilabomfim.bsky.social/rss',
-    
-    # Entretenimento e Alta no Google
-    'https://hugogloss.uol.com.br/feed/',
-    'https://trends.google.com/trends/trendingsearches/daily/rss?geo=BR'
+# ==========================================
+# FONTES DE DADOS (FEEDS RSS)
+# ==========================================
+RSS_FEEDS = [
+    "https://feeds.folha.uol.com.br/poder/rss091.xml",
+    "https://www.poder360.com.br/feed/",
+    "https://agenciabrasil.ebc.com.br/rss/ultimasnoticias/feed.xml",
+    "https://www.metropoles.com/feed"
 ]
 
-# --- INSTRUÇÃO DE AGRUPAMENTO DA IA ---
-CONTEXTO = """
-Você é um curador de informações estratégicas. Abaixo você receberá uma lista com TODAS as notícias, trends e posts publicados nos últimos 15 minutos.
+GOOGLE_TRENDS_BR_RSS = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=BR"
 
-Seu público-alvo tem um olhar voltado para o cenário institucional (Governo, DF e Entorno), mas também monitora o mercado de comunicação, publicidade e o que está pautando a internet (cultura pop e termos em alta).
-
-SUA TAREFA:
-1. Ignore intrigas de nicho e fofocas irrelevantes de subcelebridades.
-2. Agrupe as matérias por temas centrais.
-3. Crie um resumo limpo e direto agrupando as fontes.
-
-TEMAS DE INTERESSE:
-- Política e Administração: Governo Federal, Diário Oficial, concursos, eleições.
-- Local: Infraestrutura, mobilidade urbana do Entorno do DF e Consórcio Intermunicipal.
-- Termos em Alta e Cultura Pop: O que está estourando no Google Trends e as grandes polêmicas/notícias do entretenimento (tipo Hugo Gloss) que impactam as redes sociais.
-
-FORMATO OBRIGATÓRIO DE SAÍDA (Use HTML):
-🚨 <b>Radar Atualizado</b>
-
-🔹 <b>[Título do Assunto]</b>
-[Breve resumo do que aconteceu, sem enrolação]
-🔗 <a href="link_aqui">Fonte 1</a> | <a href="link_aqui">Fonte 2</a>
-
-(Repita o bloco acima se houver mais de um assunto diferente)
-
-REGRA CRÍTICA: Se a lista não tiver NENHUMA notícia realmente relevante para esse cruzamento de política com comunicação de massa, não invente nada. Responda EXATAMENTE com a palavra: VAZIO
-"""
-
-def enviar_telegram(mensagem):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {'chat_id': CHAT_ID, 'text': mensagem, 'parse_mode': 'HTML'}
-    requests.post(url, data=payload)
-
-def analisar_bloco_com_ia(lista_noticias):
-    prompt = CONTEXTO + "\n\n=== NOTÍCIAS RECENTES ===\n" + "\n".join(lista_noticias)
-    
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
-        texto_final = response.text.strip()
-        
-        if texto_final != "VAZIO" and texto_final != "":
-            texto_final = texto_final.replace("```html", "").replace("```", "").strip()
-            enviar_telegram(texto_final)
-            print("Boletim enviado com sucesso!")
-        else:
-            print("Nada de relevante neste ciclo.")
-            
-    except Exception as e:
-        print(f"Erro na IA: {e}")
-
-def buscar_furos():
-    agora = datetime.now(timezone.utc)
-    # Roda a cada 15 minutos na nuvem
-    margem_tempo = agora - timedelta(minutes=15)
-    
-    noticias_coletadas = []
-    
-    for url in FEEDS:
+def buscar_noticias():
+    """Busca as últimas notícias dos feeds RSS."""
+    noticias_brutas = []
+    for url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
-            for artigo in feed.entries:
-                data_artigo = datetime.fromtimestamp(time.mktime(artigo.published_parsed), timezone.utc)
-                
-                if data_artigo > margem_tempo:
-                    titulo = artigo.title
-                    link = artigo.link
-                    noticias_coletadas.append(f"- {titulo}\nLink: {link}\n")
-        except Exception:
-            continue
+            # Pega as 10 notícias mais recentes de cada portal
+            for entry in feed.entries[:10]:
+                noticias_brutas.append(f"- {entry.title} (Link: {entry.link})")
+        except Exception as e:
+            print(f"Erro ao ler o feed {url}: {e}")
+    return "\n".join(noticias_brutas)
+
+def buscar_trends():
+    """Busca o Top 3 do Google Trends via RSS para evitar bloqueio de IP."""
+    trends = []
+    try:
+        feed = feedparser.parse(GOOGLE_TRENDS_BR_RSS)
+        for entry in feed.entries[:3]:
+            termo = entry.title
+            # O Google Trends envia o tráfego aproximado nesta tag específica
+            trafego = entry.get('ht_approxtraffic', 'Alta nas buscas')
+            trends.append(f"* **{termo}** ({trafego})")
+    except Exception as e:
+        print(f"Erro ao buscar Google Trends: {e}")
+        return "Não foi possível carregar as tendências hoje."
     
-    if noticias_coletadas:
-        print(f"{len(noticias_coletadas)} notícias cruas encontradas. Enviando para IA agrupar...")
-        analisar_bloco_com_ia(noticias_coletadas)
-    else:
-        print("Nenhuma matéria recente publicada nos portais nos últimos 15 minutos.")
+    return "\n".join(trends)
+
+def curadoria_com_ia(noticias_brutas):
+    """Envia as notícias brutas para o Gemini fazer a curadoria com o seu prompt."""
+    prompt = f"""
+    Você é um curador sênior de notícias focado em análise de conjuntura. 
+    Sua função é ler as manchetes abaixo e selecionar APENAS as 4 mais relevantes do dia.
+    
+    CRITÉRIOS ESTREITOS:
+    1. BASTIDORES POLÍTICOS: Articulações no Congresso, tensões entre poderes e colunas de análise.
+    2. ECONOMIA E TRABALHO: Projetos com impacto real no mercado (ex: Escala 6x1).
+    3. DADOS E MERCADO: Estatísticas nacionais pesadas e regulações (Anvisa, quebras de patente).
+    4. INOVAÇÃO NO DF: Eventos de tecnologia, publicidade, design e economia criativa em Brasília.
+
+    FORMATO OBRIGATÓRIO DE SAÍDA:
+    [Número]. [CATEGORIA]: **[Título da Notícia]**
+    * *Análise:* [1 linha de resumo analítico profundo]
+    🔗 [Link da notícia]
+    
+    Manchetes de hoje:
+    {noticias_brutas}
+    """
+    
+    model = genai.GenerativeModel('gemini-2.5-flash')
+    resposta = model.generate_content(prompt)
+    return resposta.text
+
+def enviar_telegram(mensagem):
+    """Envia a mensagem final formatada para o seu Telegram."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": mensagem,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True # Evita que os links gerem miniaturas gigantes
+    }
+    resposta = requests.post(url, json=payload)
+    if resposta.status_code != 200:
+        print(f"Erro no Telegram: {resposta.text}")
+
+def main():
+    print("Buscando notícias...")
+    noticias = buscar_noticias()
+    
+    print("Filtrando com Inteligência Artificial...")
+    noticias_curadas = curadoria_com_ia(noticias)
+    
+    print("Buscando Google Trends...")
+    trends = buscar_trends()
+    
+    # Monta a mensagem final no layout que testamos
+    mensagem_final = f"🚨 **Radar Relevante | Edição Atualizada**\n\n"
+    mensagem_final += f"{noticias_curadas}\n\n"
+    mensagem_final += f"---\n📈 **Top Palavras do Google**\n\n"
+    mensagem_final += trends
+    
+    print("Enviando para o Telegram...")
+    enviar_telegram(mensagem_final)
+    print("Feito!")
 
 if __name__ == "__main__":
-    buscar_furos()
+    main()

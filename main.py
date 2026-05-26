@@ -1,117 +1,116 @@
-import os
-import requests
 import feedparser
-import google.generativeai as genai
+import requests
+import time
+import calendar
+import os
+from google import genai
+from google.genai import types
+from datetime import datetime, timedelta, timezone
 
-# ==========================================
-# CONFIGURAÇÕES DE API E TELEGRAM
-# ==========================================
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("ID_DO_CHAT")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# --- CREDENCIAIS ---
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+CHAT_ID = os.environ.get('CHAT_ID')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-genai.configure(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ==========================================
-# FONTES DE DADOS (FEEDS RSS)
-# ==========================================
-RSS_FEEDS = [
-    "https://feeds.folha.uol.com.br/poder/rss091.xml",
-    "https://www.poder360.com.br/feed/",
-    "https://agenciabrasil.ebc.com.br/rss/ultimasnoticias/feed.xml",
-    "https://www.metropoles.com/feed"
+# --- FONTES EXPANDIDAS ---
+FEEDS = [
+    'https://www.poder360.com.br/feed/',
+    'https://g1.globo.com/rss/g1/politica/',
+    'https://www.metropoles.com/feed',
+    'https://noticias.uol.com.br/politica/rss.xml',
+    'https://www.cartacapital.com.br/politica/feed/',
+    'https://oantagonista.com.br/feed/',
+    'https://bsky.app/profile/andreiasadi.bsky.social/rss',
+    'https://bsky.app/profile/igorgadelha.bsky.social/rss',
+    'https://bsky.app/profile/octavio-guedes.bsky.social/rss',
+    'https://bsky.app/profile/camilabomfim.bsky.social/rss',
+    'https://hugogloss.uol.com.br/feed/',
+    'https://trends.google.com/trends/trendingsearches/daily/rss?geo=BR'
 ]
 
-GOOGLE_TRENDS_BR_RSS = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=BR"
+# --- CÉREBRO DA IA (System Instruction) ---
+CONTEXTO = """Você é um curador de informações estratégicas. 
 
-def buscar_noticias():
-    """Busca as últimas notícias dos feeds RSS."""
-    noticias_brutas = []
-    for url in RSS_FEEDS:
-        try:
-            feed = feedparser.parse(url)
-            # Pega as 10 notícias mais recentes de cada portal
-            for entry in feed.entries[:10]:
-                noticias_brutas.append(f"- {entry.title} (Link: {entry.link})")
-        except Exception as e:
-            print(f"Erro ao ler o feed {url}: {e}")
-    return "\n".join(noticias_brutas)
+Foco do usuário: 
+- Governo Federal, EBC, regras de publicidade legal, Diário Oficial, concursos e eleições.
+- Infraestrutura e mobilidade no DF e Consórcio Intermunicipal do Entorno.
+- Assuntos pop em alta e tendências virais de impacto.
 
-def buscar_trends():
-    """Busca o Top 3 do Google Trends via RSS para evitar bloqueio de IP."""
-    trends = []
-    try:
-        feed = feedparser.parse(GOOGLE_TRENDS_BR_RSS)
-        for entry in feed.entries[:3]:
-            termo = entry.title
-            # O Google Trends envia o tráfego aproximado nesta tag específica
-            trafego = entry.get('ht_approxtraffic', 'Alta nas buscas')
-            trends.append(f"* **{termo}** ({trafego})")
-    except Exception as e:
-        print(f"Erro ao buscar Google Trends: {e}")
-        return "Não foi possível carregar as tendências hoje."
-    
-    return "\n".join(trends)
+SUA TAREFA:
+1. Ignore intrigas e fofocas irrelevantes.
+2. Agrupe as matérias do mesmo tema.
+3. Resuma de forma limpa.
 
-def curadoria_com_ia(noticias_brutas):
-    """Envia as notícias brutas para o Gemini fazer a curadoria com o seu prompt."""
-    prompt = f"""
-    Você é um curador sênior de notícias focado em análise de conjuntura. 
-    Sua função é ler as manchetes abaixo e selecionar APENAS as 4 mais relevantes do dia.
-    
-    CRITÉRIOS ESTREITOS:
-    1. BASTIDORES POLÍTICOS: Articulações no Congresso, tensões entre poderes e colunas de análise.
-    2. ECONOMIA E TRABALHO: Projetos com impacto real no mercado (ex: Escala 6x1).
-    3. DADOS E MERCADO: Estatísticas nacionais pesadas e regulações (Anvisa, quebras de patente).
-    4. INOVAÇÃO NO DF: Eventos de tecnologia, publicidade, design e economia criativa em Brasília.
+FORMATO DE SAÍDA (HTML):
+🚨 <b>Radar Atualizado</b>
 
-    FORMATO OBRIGATÓRIO DE SAÍDA:
-    [Número]. [CATEGORIA]: **[Título da Notícia]**
-    * *Análise:* [1 linha de resumo analítico profundo]
-    🔗 [Link da notícia]
-    
-    Manchetes de hoje:
-    {noticias_brutas}
-    """
-    
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    resposta = model.generate_content(prompt)
-    return resposta.text
+🔹 <b>[Assunto]</b>
+[Resumo]
+🔗 <a href="link">Fonte 1</a>
+
+REGRA: Se nada for relevante, responda EXATAMENTE: VAZIO
+"""
 
 def enviar_telegram(mensagem):
-    """Envia a mensagem final formatada para o seu Telegram."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": mensagem,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": True # Evita que os links gerem miniaturas gigantes
-    }
-    resposta = requests.post(url, json=payload)
-    if resposta.status_code != 200:
-        print(f"Erro no Telegram: {resposta.text}")
-    else:
-        print("Mensagem enviada com sucesso ao Telegram!")
+    # Fatiamento de segurança para não ultrapassar o limite de 4096 caracteres do Telegram
+    partes = [mensagem[i:i+4000] for i in range(0, len(mensagem), 4000)]
+    for parte in partes:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {'chat_id': CHAT_ID, 'text': parte, 'parse_mode': 'HTML'}
+        requests.post(url, data=payload)
 
-def main():
-    print("Buscando notícias...")
-    noticias = buscar_noticias()
+def analisar_bloco_com_ia(lista_noticias):
+    prompt = "=== NOTÍCIAS RECENTES ===\n" + "\n".join(lista_noticias)
     
-    print("Filtrando com Inteligência Artificial...")
-    noticias_curadas = curadoria_com_ia(noticias)
+    try:
+        # Usa o system_instruction para forçar a IA a não sair do personagem
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=CONTEXTO,
+                temperature=0.3
+            )
+        )
+        texto_final = response.text.strip()
+        
+        if texto_final.upper() != "VAZIO" and texto_final:
+            texto_final = texto_final.replace("```html", "").replace("```", "").strip()
+            enviar_telegram(texto_final)
+            print("Boletim enviado com sucesso!")
+        else:
+            print("Nenhuma relevância encontrada pela IA.")
+            
+    except Exception as e:
+        print(f"Erro na IA: {e}")
+
+def buscar_furos():
+    agora = datetime.now(timezone.utc)
+    margem_tempo = agora - timedelta(minutes=15)
+    noticias_coletadas = []
     
-    print("Buscando Google Trends...")
-    trends = buscar_trends()
+    for url in FEEDS:
+        try:
+            feed = feedparser.parse(url)
+            for artigo in feed.entries:
+                # Bypass: Evita quebra caso o RSS (como Hugo Gloss/Trends) omita a data estruturada
+                if not hasattr(artigo, 'published_parsed') or not artigo.published_parsed:
+                    continue
+                
+                # Transformação: calendar.timegm previne falhas de fuso horário local que o time.mktime gera em servidores
+                data_artigo = datetime.fromtimestamp(calendar.timegm(artigo.published_parsed), timezone.utc)
+                
+                if data_artigo > margem_tempo:
+                    noticias_coletadas.append(f"- {artigo.title}\nLink: {artigo.link}\n")
+        except Exception:
+            continue
     
-    # Monta a mensagem final no layout
-    mensagem_final = f"🚨 **Radar Relevante | Edição Atualizada**\n\n"
-    mensagem_final += f"{noticias_curadas}\n\n"
-    mensagem_final += f"---\n📈 **Top Palavras do Google**\n\n"
-    mensagem_final += trends
-    
-    print("Enviando para o Telegram...")
-    enviar_telegram(mensagem_final)
-    print("Feito!")
+    if noticias_coletadas:
+        analisar_bloco_com_ia(noticias_coletadas)
+    else:
+        print("Nenhuma atualização nos últimos 15 min.")
 
 if __name__ == "__main__":
-    main()
+    buscar_furos()

@@ -2,17 +2,16 @@ import feedparser
 import requests
 import time
 import os
-import google.generativeai as genai
+from google import genai
 from datetime import datetime, timedelta, timezone
 
-# --- CREDENCIAIS (Puxadas do painel de segurança do GitHub) ---
+# --- CREDENCIAIS ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-# Configura a IA do Google
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Configura a NOVA IA do Google
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # --- FONTES DE NOTÍCIAS ---
 FEEDS = [
@@ -21,7 +20,7 @@ FEEDS = [
     'https://www.metropoles.com/feed'
 ]
 
-# --- O FILTRO DE RELEVÂNCIA (O cérebro da IA) ---
+# --- O FILTRO DE RELEVÂNCIA ---
 CONTEXTO = """
 Você é um curador de notícias focado no cenário político e administrativo. 
 Sua tarefa é avaliar se a manchete e o resumo a seguir têm impacto direto e prático para o usuário.
@@ -48,37 +47,42 @@ def enviar_telegram(mensagem):
 def avaliar_relevancia_com_ia(titulo, resumo):
     prompt = f"{CONTEXTO}\n\nTítulo: {titulo}\nResumo: {resumo}"
     try:
-        resposta = model.generate_content(prompt)
-        decisao = resposta.text.strip().upper() 
+        # Chamada com o novo pacote do Google
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        decisao = response.text.strip().upper() 
         return "SIM" in decisao
-    except Exception:
+    except Exception as e:
+        print(f"Erro na IA: {e}")
         return False
 
 def buscar_furos():
-    # Pega a hora atual e define o limite para matérias dos últimos 2 dias (para o teste)
     agora = datetime.now(timezone.utc)
-    margem_tempo = agora - timedelta(days=2)
+    margem_tempo = agora - timedelta(days=2) # Busca dos últimos 2 dias para teste
+    
+    noticias_enviadas = 0
     
     for url in FEEDS:
         feed = feedparser.parse(url)
         
         for artigo in feed.entries:
             try:
-                # Converte a data do feed
                 data_artigo = datetime.fromtimestamp(time.mktime(artigo.published_parsed), timezone.utc)
                 
-                # Só processa se for matéria recente
                 if data_artigo > margem_tempo:
                     titulo = artigo.title
                     resumo = artigo.get('summary', '') 
                     
-                    # Passa pelo filtro da IA
                     if avaliar_relevancia_com_ia(titulo, resumo):
                         msg = f"🎯 <b>Radar Relevante:</b>\n\n<b>{titulo}</b>\n\n<a href='{artigo.link}'>Ler matéria</a>"
                         enviar_telegram(msg)
+                        noticias_enviadas += 1
             except Exception:
                 continue
+    
+    print(f"Processo finalizado. {noticias_enviadas} notícias enviadas.")
 
-# Executa o código principal
 if __name__ == "__main__":
     buscar_furos()

@@ -3,8 +3,7 @@ import requests
 import time
 import calendar
 import os
-from google import genai
-from google.genai import types
+import google.genai as genai
 from datetime import datetime, timedelta, timezone
 
 # --- CREDENCIAIS ---
@@ -12,6 +11,7 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
+# Instancia o cliente da IA
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # --- FONTES EXPANDIDAS ---
@@ -30,7 +30,6 @@ FEEDS = [
     'https://trends.google.com/trends/trendingsearches/daily/rss?geo=BR'
 ]
 
-# --- CÉREBRO DA IA (System Instruction) ---
 CONTEXTO = """Você é um curador de informações estratégicas. 
 
 Foco do usuário: 
@@ -50,11 +49,10 @@ FORMATO DE SAÍDA (HTML):
 [Resumo]
 🔗 <a href="link">Fonte 1</a>
 
-REGRA: Se nada for relevante, responda EXATAMENTE: VAZIO
+REGRA: Se nada for relevante, responda EXATAMENTE com a palavra: VAZIO
 """
 
 def enviar_telegram(mensagem):
-    # Fatiamento de segurança para não ultrapassar o limite de 4096 caracteres do Telegram
     partes = [mensagem[i:i+4000] for i in range(0, len(mensagem), 4000)]
     for parte in partes:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -62,17 +60,13 @@ def enviar_telegram(mensagem):
         requests.post(url, data=payload)
 
 def analisar_bloco_com_ia(lista_noticias):
-    prompt = "=== NOTÍCIAS RECENTES ===\n" + "\n".join(lista_noticias)
+    # O contexto é injetado diretamente no corpo do texto para evitar erros de config da API
+    prompt = f"{CONTEXTO}\n\n=== NOTÍCIAS RECENTES ===\n" + "\n".join(lista_noticias)
     
     try:
-        # Usa o system_instruction para forçar a IA a não sair do personagem
         response = client.models.generate_content(
             model='gemini-1.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=CONTEXTO,
-                temperature=0.3
-            )
+            contents=prompt
         )
         texto_final = response.text.strip()
         
@@ -88,18 +82,17 @@ def analisar_bloco_com_ia(lista_noticias):
 
 def buscar_furos():
     agora = datetime.now(timezone.utc)
-    margem_tempo = agora - timedelta(minutes=15)
+    # Voltei para 2 dias para forçarmos o teste e vermos o boletim chegar agora
+    margem_tempo = agora - timedelta(days=2)
     noticias_coletadas = []
     
     for url in FEEDS:
         try:
             feed = feedparser.parse(url)
             for artigo in feed.entries:
-                # Bypass: Evita quebra caso o RSS (como Hugo Gloss/Trends) omita a data estruturada
                 if not hasattr(artigo, 'published_parsed') or not artigo.published_parsed:
                     continue
                 
-                # Transformação: calendar.timegm previne falhas de fuso horário local que o time.mktime gera em servidores
                 data_artigo = datetime.fromtimestamp(calendar.timegm(artigo.published_parsed), timezone.utc)
                 
                 if data_artigo > margem_tempo:
@@ -108,9 +101,10 @@ def buscar_furos():
             continue
     
     if noticias_coletadas:
+        print(f"Enviando {len(noticias_coletadas)} matérias para agrupamento...")
         analisar_bloco_com_ia(noticias_coletadas)
     else:
-        print("Nenhuma atualização nos últimos 15 min.")
+        print("Nenhuma atualização recente.")
 
 if __name__ == "__main__":
     buscar_furos()

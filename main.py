@@ -46,26 +46,39 @@ FORMATO DE SAÍDA (HTML):
 
 🔹 <b>[Assunto]</b>
 [Resumo]
-🔗 <a href="link">Fonte 1</a>
 
-REGRA: Se nada for relevante, responda EXATAMENTE com a palavra: VAZIO
+Fontes:
+🔗 https://www.dafont.com/pt/one-1.font
+🔗 https://www.dafont.com/pt/from-me-2-you.font
+
+REGRA: Se nada for relevante, responda EXATAMENTE com a palavra: VAZIO. NUNCA utilize a tag <a href="...">, coloque APENAS a URL pura após o ícone 🔗.
 """
 
 def enviar_telegram(mensagem):
+    # Fatiamento seguro para os 4096 caracteres do Telegram
     partes = [mensagem[i:i+4000] for i in range(0, len(mensagem), 4000)]
     for parte in partes:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {'chat_id': CHAT_ID, 'text': parte, 'parse_mode': 'HTML'}
-        resposta = requests.post(url, data=payload)
+        payload = {
+            'chat_id': CHAT_ID, 
+            'text': parte, 
+            'parse_mode': 'HTML',
+            # O link_preview_options desativa o painel gigante que o Telegram tenta criar para cada link
+            'link_preview_options': {'is_disabled': True} 
+        }
+        resposta = requests.post(url, json=payload)
         
-        # Se o Telegram rejeitar a mensagem (normalmente por quebra no HTML gerado pela IA)
         if resposta.status_code != 200:
-            print(f"Erro do Telegram ao enviar HTML: {resposta.text}")
-            print("Tentando reenviar em modo de texto simples como segurança...")
+            print(f"Erro do Telegram ao enviar: {resposta.text}")
             
-            # Remove a exigência do modo HTML e tenta enviar a mesma mensagem novamente
-            payload['parse_mode'] = None
-            resposta_fallback = requests.post(url, data=payload)
+            # Limpa as tags HTML para forçar o envio em modo texto simples
+            texto_limpo = parte.replace("<b>", "").replace("</b>", "")
+            payload_limpo = {
+                'chat_id': CHAT_ID, 
+                'text': texto_limpo,
+                'link_preview_options': {'is_disabled': True} 
+            }
+            resposta_fallback = requests.post(url, json=payload_limpo)
             
             if resposta_fallback.status_code == 200:
                 print("Mensagem de segurança enviada com sucesso em texto simples!")
@@ -94,7 +107,7 @@ def analisar_bloco_com_ia(lista_noticias):
 
 def buscar_furos():
     agora = datetime.now(timezone.utc)
-    # Buscando matérias do último 1 dia para garantir que o teste funcione agora
+    # Buscando matérias do último 1 dia para o teste
     margem_tempo = agora - timedelta(days=1)
     noticias_coletadas = []
     
